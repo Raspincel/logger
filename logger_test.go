@@ -5,8 +5,23 @@ import (
 	"testing"
 )
 
+func handleMetadataError(tc LogData, err error, t *testing.T) {
+	if tc.Metadata["result"].(string) == "error" && err == nil {
+		t.Errorf("Expected error, got nil. Level: %v, Category: %v", tc.Level, tc.Category)
+	}
+
+	if tc.Metadata["result"].(string) != "error" && err != nil {
+		t.Errorf("Expected nil, got error. Level: %v, Category: %v", tc.Level, tc.Category)
+	}
+}
+
 func TestLogger(t *testing.T) {
-	l := NewLogger(LoggerConfig{})
+	l := NewLogger(LoggerConfig{
+		AllowLoggingDisabled:  true,
+		EnableDefaultLevels:   true,
+		EnableDefaultCategory: true,
+	})
+
 	const writer Writer = "default"
 
 	testCases := []LogData{
@@ -40,7 +55,6 @@ func TestLogger(t *testing.T) {
 		}
 
 		if actual.Message != tc.Message {
-			fmt.Println(actual.Message, tc.Message)
 			t.Errorf("Expected message %v, got %v", tc.Message, actual.Message)
 		}
 		if actual.Metadata["key"] != tc.Metadata["key"] {
@@ -59,26 +73,22 @@ func TestLogger(t *testing.T) {
 }
 
 func TestRules(t *testing.T) {
-	l := NewLogger(LoggerConfig{ForceCategoryEnabling: true, ForceLevelEnabling: true})
+	l := NewLogger(LoggerConfig{
+		EnableDefaultLevels:   true,
+		EnableDefaultCategory: true,
+		UseLock:               true,
+	})
 
 	const writer Writer = "default"
 
-	l.EnableCategory("cat1")
-	l.EnableLevel("level1")
-
-	l.EnableCategory("cat2")
-	l.EnableLevel("level2")
-
-	l.DisableCategory("cat2")
-	l.DisableLevel("level2")
+	l.EnableCategory("cat")
+	l.EnableLevel("level")
 
 	testCases := []LogData{
 		{Message: "Error", Metadata: map[string]any{"result": "error"}, Writer: "window", Level: "1", Category: Default},
 		{Message: "Error", Metadata: map[string]any{"result": "error"}, Writer: "window", Level: Error, Category: "main"},
-		{Message: "Success", Metadata: map[string]any{"result": "success"}, Writer: writer, Level: "level1", Category: Default},
-		{Message: "Success", Metadata: map[string]any{"result": "success"}, Writer: writer, Level: Info, Category: "cat1"},
-		{Message: "Error", Metadata: map[string]any{"result": "error"}, Writer: writer, Level: "level2", Category: Default},
-		{Message: "Error", Metadata: map[string]any{"result": "error"}, Writer: writer, Level: Info, Category: "cat2"},
+		{Message: "Success", Metadata: map[string]any{"result": "success"}, Writer: writer, Level: "level", Category: Default},
+		{Message: "Success", Metadata: map[string]any{"result": "success"}, Writer: writer, Level: Info, Category: "cat"},
 	}
 
 	l.AddWriter(writer, func(e LogEntry) {})
@@ -92,12 +102,66 @@ func TestRules(t *testing.T) {
 			Category: tc.Category,
 		})
 
-		if tc.Metadata["result"].(string) == "error" && err == nil {
-			t.Errorf("Expected error, got nil. Level: %v, Category: %v", tc.Level, tc.Category)
-		}
+		handleMetadataError(tc, err, t)
+	}
+}
 
-		if tc.Metadata["result"].(string) != "error" && err != nil {
-			t.Errorf("Expected nil, got error. Level: %v, Category: %v", tc.Level, tc.Category)
-		}
+func TestDisabling(t *testing.T) {
+	l := NewLogger(LoggerConfig{
+		EnableDefaultLevels: true,
+	})
+
+	const writer Writer = "default"
+
+	l.EnableCategory("main")
+
+	l.DisableCategory(Default)
+	l.DisableLevel(Debug)
+
+	err := map[string]any{"result": "error"}
+	suc := map[string]any{"result": "success"}
+
+	testCases := []LogData{
+		{Metadata: err, Writer: writer, Level: Info, Category: Default},
+		{Metadata: err, Writer: writer, Level: Debug, Category: "main"},
+		{Metadata: suc, Writer: writer, Level: Info, Category: "main"},
+	}
+
+	l.AddWriter(writer, func(e LogEntry) {})
+
+	for _, tc := range testCases {
+		err := l.Log(LogData{
+			Message:  tc.Message,
+			Metadata: tc.Metadata,
+			Writer:   tc.Writer,
+			Level:    tc.Level,
+			Category: tc.Category,
+		})
+
+		handleMetadataError(tc, err, t)
+	}
+
+	testCases = []LogData{
+		{Metadata: err, Writer: writer, Level: Info, Category: Default},
+		{Metadata: err, Writer: writer, Level: Debug, Category: "main"},
+		{Metadata: err, Writer: writer, Level: Info, Category: "main"},
+	}
+
+	l.EnableCategory(Default)
+	l.EnableLevel(Debug)
+
+	l.DisableAllCategories()
+	l.DisableAllLevels()
+
+	for _, tc := range testCases {
+		err := l.Log(LogData{
+			Message:  tc.Message,
+			Metadata: tc.Metadata,
+			Writer:   tc.Writer,
+			Level:    tc.Level,
+			Category: tc.Category,
+		})
+
+		handleMetadataError(tc, err, t)
 	}
 }
